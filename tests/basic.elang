@@ -1,0 +1,10 @@
+define function add with left, right
+    return left plus right
+end
+
+let total be call add with 2, 3
+
+call assert_equal with total, 5, "add should work"
+call assert with not false
+call assert_equal with (call type_of with total), "number"
+call assert_equal with (call to_text with total), "5"

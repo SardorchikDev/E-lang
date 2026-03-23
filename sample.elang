@@ -1,0 +1,42 @@
+note This sample shows the expanded E-Lang language.
+
+use "sample_lib.elang"
+
+let student be record of name is "Ava", level is 5, scores is list of 3, 4, 5
+
+say call greet with call get_field with student, "name"
+say "Current level:"
+say call describe_level with call get_field with student, "level"
+
+say "Scores:"
+for each score in call get_field with student, "scores"
+    say score
+end
+
+let total be 0
+for each score in call get_field with student, "scores"
+    set total to total plus score
+end
+
+say "Total score:"
+say total
+say "Student has a level field?"
+say student contains "level"
+
+ask "What topic do you enjoy most?" and store in topic
+
+if topic contains "math" then
+    say "Nice. E-Lang can do math too."
+else if topic contains "art" then
+    say "Nice. E-Lang can work with text and records too."
+else
+    say "Nice. E-Lang is flexible."
+end
+
+let words be call split with "easy as heck", " "
+say "Joined words:"
+say call join with words, "-"
+
+let tags be call sort with call keys with student
+say "Sorted record fields:"
+say tags

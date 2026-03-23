@@ -1,0 +1,11 @@
+use "_support.elang"
+
+call assert_equal with (call triple with 4), 12
+call assert with shared contains "status"
+
+let total be 0
+for each value in call get_field with shared, "values"
+    set total to total plus value
+end
+
+call assert_equal with total, 6

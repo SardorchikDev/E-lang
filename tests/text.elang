@@ -1,0 +1,7 @@
+let pieces be call split with "  Easy AS Heck  ", " "
+let cleaned be call trim with "  Easy AS Heck  "
+
+call assert_equal with cleaned, "Easy AS Heck"
+call assert_equal with (call lowercase with cleaned), "easy as heck"
+call assert_equal with (call uppercase with "ok"), "OK"
+call assert_equal with (call join with pieces, "-"), "--Easy-AS-Heck--"

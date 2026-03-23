@@ -1,0 +1,13 @@
+define function greet with name
+    return "Hello, " plus name
+end
+
+define function describe_level with level
+    if level is at least 8 then
+        return "advanced"
+    else if level is at least 4 then
+        return "intermediate"
+    else
+        return "beginner"
+    end
+end

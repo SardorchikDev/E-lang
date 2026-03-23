@@ -1,0 +1,52 @@
+note Simple number guessing game in E-Lang.
+
+say "Welcome to the E-Lang number guessing game."
+say "I am thinking of a number from 1 to 10."
+
+let secret be 1
+let random_value be call random
+let scaled_value be random_value times 10
+
+note Turn a random value into a whole number from 1 to 10.
+if scaled_value is less than 1 then
+    set secret to 1
+else if scaled_value is less than 2 then
+    set secret to 2
+else if scaled_value is less than 3 then
+    set secret to 3
+else if scaled_value is less than 4 then
+    set secret to 4
+else if scaled_value is less than 5 then
+    set secret to 5
+else if scaled_value is less than 6 then
+    set secret to 6
+else if scaled_value is less than 7 then
+    set secret to 7
+else if scaled_value is less than 8 then
+    set secret to 8
+else if scaled_value is less than 9 then
+    set secret to 9
+else
+    set secret to 10
+end
+
+let tries be 0
+let guessed_it be false
+
+while not guessed_it do
+    ask "Enter your guess:" and store in guess
+    set tries to tries plus 1
+
+    if guess is less than 1 or guess is greater than 10 then
+        say "Please enter a number from 1 to 10."
+    else if guess is less than secret then
+        say "Too low."
+    else if guess is greater than secret then
+        say "Too high."
+    else
+        set guessed_it to true
+        say "You guessed it!"
+        say "Number of tries:"
+        say tries
+    end
+end

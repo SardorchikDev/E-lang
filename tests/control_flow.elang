@@ -1,0 +1,14 @@
+let seen be list
+let count be 0
+
+repeat 5 times
+    set count to count plus 1
+    if count is equal to 2 then
+        continue
+    else if count is equal to 5 then
+        break
+    end
+    set seen to call append with seen, count
+end
+
+call assert_equal with seen, (list of 1, 3, 4)

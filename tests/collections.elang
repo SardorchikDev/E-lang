@@ -1,0 +1,19 @@
+let numbers be list of 4, 1, 3
+let sorted_numbers be call sort with numbers
+
+call assert_equal with (call item with sorted_numbers, 1), 1
+call assert_equal with (call item with sorted_numbers, 3), 4
+
+let person be record of name is "Ada", age is 12
+call assert with person contains "name"
+call assert_equal with (call get_field with person, "age"), 12
+
+let updated_person be call set_field with person, "age", 13
+call assert_equal with (call get_field with updated_person, "age"), 13
+
+let total be 0
+for each item in sorted_numbers
+    set total to total plus item
+end
+
+call assert_equal with total, 8
