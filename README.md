@@ -213,7 +213,9 @@ Update:
 
 ```text
 set age to age plus 1
-set scores to call append with scores, 6
+append 6 to scores
+set item 1 of scores to 10
+set field age of person to 13
 ```
 
 ### Output
@@ -291,10 +293,19 @@ call append with numbers, 4
 call greet with "Ada"
 ```
 
+Natural collection and record access:
+
+```text
+item 1 of scores
+item 2 of field scores of student
+field age of person
+field "display name" of user
+```
+
 Important note: when a function call is only part of a larger expression, grouping is the clearest form:
 
 ```text
-if (call get_field with user, "age") is greater than 10 then
+if (field age of user) is greater than 10 then
     say "older than ten"
 end
 ```
@@ -401,6 +412,15 @@ end
 
 ## Built-In Functions
 
+Common list and record work also has direct syntax now:
+
+- `item 1 of list_name`
+- `field age of person`
+- `append value to list_name`
+- `set item 2 of list_name to value`
+- `remove item 2 from list_name`
+- `set field age of person to value`
+
 Assertions:
 
 - `assert`
@@ -467,6 +487,8 @@ program             -> statement*
 statement           -> use_statement
                     | let_statement
                     | set_statement
+                    | append_statement
+                    | remove_item_statement
                     | say_statement
                     | ask_statement
                     | if_statement
@@ -483,6 +505,11 @@ statement           -> use_statement
 use_statement       -> "use" STRING
 let_statement       -> "let" NAME "be" expression
 set_statement       -> "set" NAME "to" expression
+                    | "set" "item" expression "of" NAME "to" expression
+                    | "set" "field" (NAME | STRING) "of" NAME "to" expression
+append_statement    -> "append" expression "to" NAME
+remove_item_statement
+                    -> "remove" "item" expression "from" NAME
 say_statement       -> "say" expression
 ask_statement       -> "ask" expression "and" "store" "in" NAME
 
@@ -527,10 +554,14 @@ primary             -> NUMBER
                     | NAME
                     | "(" expression ")"
                     | call_expression
+                    | item_expression
+                    | field_expression
                     | list_expression
                     | record_expression
 
 call_expression     -> "call" NAME ["with" expression ("," expression)*]
+item_expression     -> "item" expression "of" expression
+field_expression    -> "field" (NAME | STRING) "of" expression
 list_expression     -> "list" ["of" expression ("," expression)*]
 record_expression   -> "record" ["of" field ("," field)*]
 field               -> (NAME | STRING) "is" expression
@@ -542,7 +573,7 @@ field               -> (NAME | STRING) "is" expression
 
 1. Imports `sample_lib.elang`.
 2. Builds a `student` record with a name, a level, and a score list.
-3. Calls imported functions to greet the user and describe the student level.
+3. Uses natural `field ... of ...` access while calling imported functions.
 4. Uses `for each` to print every score.
 5. Sums the scores with `set`.
 6. Uses `contains` and `split` / `join`.
@@ -561,7 +592,7 @@ Run it with:
 The current project is already a real mini-language, but obvious next steps are:
 
 - first-class modules and exports instead of simple `use`
-- dictionaries with richer field access syntax like `person.name`
+- nested update syntax for expressions beyond simple variable targets
 - a stronger standard library
 - better argument parsing for complex nested call expressions
 - a bytecode backend for speed

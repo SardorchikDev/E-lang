@@ -4,17 +4,17 @@ use "sample_lib.elang"
 
 let student be record of name is "Ava", level is 5, scores is list of 3, 4, 5
 
-say call greet with call get_field with student, "name"
+say call greet with field name of student
 say "Current level:"
-say call describe_level with call get_field with student, "level"
+say call describe_level with field level of student
 
 say "Scores:"
-for each score in call get_field with student, "scores"
+for each score in field scores of student
     say score
 end
 
 let total be 0
-for each score in call get_field with student, "scores"
+for each score in field scores of student
     set total to total plus score
 end
 

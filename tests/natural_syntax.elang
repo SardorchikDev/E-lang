@@ -1,0 +1,21 @@
+let numbers be list of 4, 1, 3
+append 9 to numbers
+
+call assert_equal with (item 1 of numbers), 4
+call assert_equal with (item 4 of numbers), 9
+
+set item 2 of numbers to 8
+call assert_equal with (item 2 of numbers), 8
+
+remove item 1 from numbers
+call assert_equal with numbers, (list of 8, 3, 9)
+
+let person be record of name is "Ada", age is 12
+call assert_equal with (field age of person), 12
+
+set field age of person to 13
+call assert_equal with (field age of person), 13
+call assert_equal with (field "name" of person), "Ada"
+
+let student be record of scores is list of 2, 4
+call assert_equal with (item 2 of field scores of student), 4

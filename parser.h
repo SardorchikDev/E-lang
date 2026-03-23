@@ -24,7 +24,9 @@ typedef enum {
     EXPR_UNARY,
     EXPR_BINARY,
     EXPR_COMPARISON,
-    EXPR_CALL
+    EXPR_CALL,
+    EXPR_ITEM_ACCESS,
+    EXPR_FIELD_ACCESS
 } ExpressionType;
 
 typedef enum {
@@ -94,6 +96,14 @@ struct Expression {
             Expression **arguments;
             int arg_count;
         } call;
+        struct {
+            Expression *index;
+            Expression *collection;
+        } item_access;
+        struct {
+            char *field_name;
+            Expression *record;
+        } field_access;
     } as;
 };
 
@@ -101,6 +111,10 @@ typedef enum {
     STMT_USE,
     STMT_LET,
     STMT_SET,
+    STMT_APPEND,
+    STMT_SET_ITEM,
+    STMT_REMOVE_ITEM,
+    STMT_SET_FIELD,
     STMT_SAY,
     STMT_ASK,
     STMT_IF,
@@ -131,6 +145,24 @@ struct Statement {
             char *name;
             Expression *value;
         } set_stmt;
+        struct {
+            char *name;
+            Expression *value;
+        } append_stmt;
+        struct {
+            char *name;
+            Expression *index;
+            Expression *value;
+        } set_item_stmt;
+        struct {
+            char *name;
+            Expression *index;
+        } remove_item_stmt;
+        struct {
+            char *name;
+            char *field_name;
+            Expression *value;
+        } set_field_stmt;
         struct {
             Expression *value;
         } say_stmt;

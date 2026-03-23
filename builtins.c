@@ -21,6 +21,50 @@ static bool equals_ignore_case(const char *left, const char *right) {
     return left[index] == '\0' && right[index] == '\0';
 }
 
+typedef struct {
+    const char *name;
+    int min_args;
+    int max_args;
+} BuiltinInfo;
+
+static const BuiltinInfo BUILTIN_INFOS[] = {
+    {"assert", 1, 2},
+    {"assert_equal", 2, 3},
+    {"length", 1, 1},
+    {"item", 2, 2},
+    {"append", 2, 2},
+    {"set_item", 3, 3},
+    {"insert_item", 3, 3},
+    {"remove_item", 2, 2},
+    {"slice", 3, 3},
+    {"sort", 1, 1},
+    {"to_number", 1, 1},
+    {"to_text", 1, 1},
+    {"type_of", 1, 1},
+    {"lowercase", 1, 1},
+    {"uppercase", 1, 1},
+    {"trim", 1, 1},
+    {"split", 2, 2},
+    {"join", 2, 2},
+    {"sqrt", 1, 1},
+    {"random", 0, 0},
+    {"random_between", 2, 2},
+    {"round", 1, 1},
+    {"floor", 1, 1},
+    {"ceiling", 1, 1},
+    {"absolute", 1, 1},
+    {"minimum", 2, 2},
+    {"maximum", 2, 2},
+    {"read_file", 1, 1},
+    {"write_file", 2, 2},
+    {"append_file", 2, 2},
+    {"file_exists", 1, 1},
+    {"get_field", 2, 2},
+    {"set_field", 3, 3},
+    {"has_field", 2, 2},
+    {"keys", 1, 1}
+};
+
 static void builtin_error(char *buffer, size_t buffer_size, SourceLocation location, const char *format, ...) {
     va_list args;
     size_t used;
@@ -282,18 +326,28 @@ static bool write_text_file(const char *path, const char *text, const char *mode
 }
 
 bool builtins_is_name(const char *name) {
-    static const char *names[] = {
-        "assert", "assert_equal", "length", "item", "append", "set_item", "insert_item",
-        "remove_item", "slice", "sort", "to_number", "to_text", "type_of",
-        "lowercase", "uppercase", "trim", "split", "join", "sqrt", "random",
-        "random_between", "round", "floor", "ceiling", "absolute", "minimum", "maximum",
-        "read_file", "write_file", "append_file", "file_exists",
-        "get_field", "set_field", "has_field", "keys"
-    };
     size_t index;
 
-    for (index = 0; index < sizeof(names) / sizeof(names[0]); index += 1) {
-        if (equals_ignore_case(name, names[index])) {
+    for (index = 0; index < sizeof(BUILTIN_INFOS) / sizeof(BUILTIN_INFOS[0]); index += 1) {
+        if (equals_ignore_case(name, BUILTIN_INFOS[index].name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool builtins_get_arity(const char *name, int *out_min_args, int *out_max_args) {
+    size_t index;
+
+    for (index = 0; index < sizeof(BUILTIN_INFOS) / sizeof(BUILTIN_INFOS[0]); index += 1) {
+        if (equals_ignore_case(name, BUILTIN_INFOS[index].name)) {
+            if (out_min_args != NULL) {
+                *out_min_args = BUILTIN_INFOS[index].min_args;
+            }
+            if (out_max_args != NULL) {
+                *out_max_args = BUILTIN_INFOS[index].max_args;
+            }
             return true;
         }
     }

@@ -9,7 +9,10 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS) -lm
 
+test: $(TARGET)
+	./$(TARGET) --test
+
 clean:
 	rm -f $(TARGET) $(OBJECTS)
 
-.PHONY: all clean
+.PHONY: all test clean

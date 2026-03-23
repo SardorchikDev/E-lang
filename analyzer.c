@@ -16,6 +16,12 @@ typedef struct {
 } NameList;
 
 typedef struct {
+    char **names;
+    int *param_counts;
+    int count;
+} FunctionList;
+
+typedef struct {
     NameList *scopes;
     int scope_count;
     int loop_depth;
@@ -27,7 +33,7 @@ typedef struct {
     char *error_message;
     size_t error_size;
     bool had_error;
-    NameList functions;
+    FunctionList functions;
     NameList global_candidates;
     NameList visited_imports;
 } AnalyzerState;
@@ -136,6 +142,69 @@ static void free_name_list(NameList *list) {
     }
     free(list->names);
     list->names = NULL;
+    list->count = 0;
+}
+
+static int function_list_find_index(const FunctionList *list, const char *name) {
+    int index;
+
+    for (index = 0; index < list->count; index += 1) {
+        if (equals_ignore_case(list->names[index], name)) {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+static bool add_function_copy(FunctionList *list, const char *name, int param_count) {
+    char *copy = duplicate_text(name);
+    char **new_names;
+    int *new_param_counts;
+    int index;
+
+    if (copy == NULL) {
+        return false;
+    }
+
+    new_names = (char **) malloc((size_t) (list->count + 1) * sizeof(char *));
+    if (new_names == NULL) {
+        free(copy);
+        return false;
+    }
+
+    new_param_counts = (int *) malloc((size_t) (list->count + 1) * sizeof(int));
+    if (new_param_counts == NULL) {
+        free(new_names);
+        free(copy);
+        return false;
+    }
+
+    for (index = 0; index < list->count; index += 1) {
+        new_names[index] = list->names[index];
+        new_param_counts[index] = list->param_counts[index];
+    }
+    new_names[list->count] = copy;
+    new_param_counts[list->count] = param_count;
+
+    free(list->names);
+    free(list->param_counts);
+    list->names = new_names;
+    list->param_counts = new_param_counts;
+    list->count += 1;
+    return true;
+}
+
+static void free_function_list(FunctionList *list) {
+    int index;
+
+    for (index = 0; index < list->count; index += 1) {
+        free(list->names[index]);
+    }
+    free(list->names);
+    free(list->param_counts);
+    list->names = NULL;
+    list->param_counts = NULL;
     list->count = 0;
 }
 
@@ -399,13 +468,18 @@ static bool collect_function_names_from_statements(AnalyzerState *state,
         const Statement *statement = statements[index];
 
         if (statement->type == STMT_FUNCTION) {
-            if (name_list_contains(&state->functions, statement->as.function_stmt.name)) {
+            int existing_index = function_list_find_index(&state->functions, statement->as.function_stmt.name);
+
+            if (existing_index >= 0) {
                 if (!add_warning(state, statement->location,
                                  "The function '%s' is defined more than once. Later definitions replace earlier ones.",
                                  statement->as.function_stmt.name)) {
                     return false;
                 }
-            } else if (!add_name_copy(&state->functions, statement->as.function_stmt.name)) {
+                state->functions.param_counts[existing_index] = statement->as.function_stmt.param_count;
+            } else if (!add_function_copy(&state->functions,
+                                          statement->as.function_stmt.name,
+                                          statement->as.function_stmt.param_count)) {
                 set_error(state, "I ran out of memory while linting function names.");
                 return false;
             }
@@ -534,6 +608,20 @@ static bool analyze_expression(AnalyzerState *state,
                 if (!analyze_expression(state, expression->as.record.values[index], context)) {
                     return false;
                 }
+                {
+                    int other_index;
+                    for (other_index = 0; other_index < index; other_index += 1) {
+                        if (strcmp(expression->as.record.keys[other_index],
+                                   expression->as.record.keys[index]) == 0) {
+                            if (!add_warning(state, expression->location,
+                                             "The record field '%s' appears more than once. The later value replaces the earlier one.",
+                                             expression->as.record.keys[index])) {
+                                return false;
+                            }
+                            break;
+                        }
+                    }
+                }
             }
             return true;
 
@@ -557,15 +645,58 @@ static bool analyze_expression(AnalyzerState *state,
                     return false;
                 }
             }
-            if (!builtins_is_name(expression->as.call.name) &&
-                !name_list_contains(&state->functions, expression->as.call.name)) {
-                if (!add_warning(state, expression->location,
-                                 "The function '%s' is called, but no definition was found in this file.",
-                                 expression->as.call.name)) {
+            if (builtins_is_name(expression->as.call.name)) {
+                int min_args = 0;
+                int max_args = 0;
+
+                if (builtins_get_arity(expression->as.call.name, &min_args, &max_args) &&
+                    (expression->as.call.arg_count < min_args || expression->as.call.arg_count > max_args)) {
+                    if (min_args == max_args) {
+                        if (!add_warning(state, expression->location,
+                                         "The built-in function '%s' expects %d argument%s, but this call passes %d.",
+                                         expression->as.call.name,
+                                         min_args,
+                                         min_args == 1 ? "" : "s",
+                                         expression->as.call.arg_count)) {
+                            return false;
+                        }
+                    } else if (!add_warning(state, expression->location,
+                                            "The built-in function '%s' expects between %d and %d arguments, but this call passes %d.",
+                                            expression->as.call.name,
+                                            min_args,
+                                            max_args,
+                                            expression->as.call.arg_count)) {
+                        return false;
+                    }
+                }
+            } else {
+                int function_index = function_list_find_index(&state->functions, expression->as.call.name);
+
+                if (function_index >= 0) {
+                    int expected = state->functions.param_counts[function_index];
+                    if (expected != expression->as.call.arg_count &&
+                        !add_warning(state, expression->location,
+                                     "The function '%s' expects %d argument%s, but this call passes %d.",
+                                     expression->as.call.name,
+                                     expected,
+                                     expected == 1 ? "" : "s",
+                                     expression->as.call.arg_count)) {
+                        return false;
+                    }
+                } else if (!add_warning(state, expression->location,
+                                         "The function '%s' is called, but no definition was found in this file.",
+                                         expression->as.call.name)) {
                     return false;
                 }
             }
             return true;
+
+        case EXPR_ITEM_ACCESS:
+            return analyze_expression(state, expression->as.item_access.index, context) &&
+                   analyze_expression(state, expression->as.item_access.collection, context);
+
+        case EXPR_FIELD_ACCESS:
+            return analyze_expression(state, expression->as.field_access.record, context);
     }
 
     return true;
@@ -628,6 +759,59 @@ static bool analyze_statement(AnalyzerState *state,
                 if (!add_warning(state, statement->location,
                                  "The variable '%s' is changed with 'set' before it exists.",
                                  statement->as.set_stmt.name)) {
+                    return false;
+                }
+            }
+            return true;
+
+        case STMT_APPEND:
+            if (!analyze_expression(state, statement->as.append_stmt.value, context)) {
+                return false;
+            }
+            if (!name_exists_in_context(context, statement->as.append_stmt.name)) {
+                if (!add_warning(state, statement->location,
+                                 "The list '%s' is changed with 'append' before it exists.",
+                                 statement->as.append_stmt.name)) {
+                    return false;
+                }
+            }
+            return true;
+
+        case STMT_SET_ITEM:
+            if (!analyze_expression(state, statement->as.set_item_stmt.index, context) ||
+                !analyze_expression(state, statement->as.set_item_stmt.value, context)) {
+                return false;
+            }
+            if (!name_exists_in_context(context, statement->as.set_item_stmt.name)) {
+                if (!add_warning(state, statement->location,
+                                 "The list '%s' is changed with 'set item' before it exists.",
+                                 statement->as.set_item_stmt.name)) {
+                    return false;
+                }
+            }
+            return true;
+
+        case STMT_REMOVE_ITEM:
+            if (!analyze_expression(state, statement->as.remove_item_stmt.index, context)) {
+                return false;
+            }
+            if (!name_exists_in_context(context, statement->as.remove_item_stmt.name)) {
+                if (!add_warning(state, statement->location,
+                                 "The list '%s' is changed with 'remove item' before it exists.",
+                                 statement->as.remove_item_stmt.name)) {
+                    return false;
+                }
+            }
+            return true;
+
+        case STMT_SET_FIELD:
+            if (!analyze_expression(state, statement->as.set_field_stmt.value, context)) {
+                return false;
+            }
+            if (!name_exists_in_context(context, statement->as.set_field_stmt.name)) {
+                if (!add_warning(state, statement->location,
+                                 "The record '%s' is changed with 'set field' before it exists.",
+                                 statement->as.set_field_stmt.name)) {
                     return false;
                 }
             }
@@ -742,10 +926,26 @@ static bool analyze_statement_list(AnalyzerState *state,
                                    int count,
                                    AnalysisContext *context) {
     int index;
+    bool block_has_terminated = false;
+    bool warned_unreachable = false;
 
     for (index = 0; index < count; index += 1) {
+        if (block_has_terminated && !warned_unreachable) {
+            if (!add_warning(state, statements[index]->location,
+                             "This statement cannot run because the previous line already leaves this block.")) {
+                return false;
+            }
+            warned_unreachable = true;
+        }
+
         if (!analyze_statement(state, statements[index], context)) {
             return false;
+        }
+
+        if (statements[index]->type == STMT_RETURN ||
+            statements[index]->type == STMT_BREAK ||
+            statements[index]->type == STMT_CONTINUE) {
+            block_has_terminated = true;
         }
     }
 
@@ -764,6 +964,7 @@ bool analyze_program(const Program *program, AnalyzerReport *report, char *error
     state.error_size = error_size;
     state.had_error = false;
     state.functions.names = NULL;
+    state.functions.param_counts = NULL;
     state.functions.count = 0;
     state.global_candidates.names = NULL;
     state.global_candidates.count = 0;
@@ -814,7 +1015,7 @@ bool analyze_program(const Program *program, AnalyzerReport *report, char *error
     while (context.scope_count > 0) {
         pop_scope(&context);
     }
-    free_name_list(&state.functions);
+    free_function_list(&state.functions);
     free_name_list(&state.global_candidates);
     free_name_list(&state.visited_imports);
 

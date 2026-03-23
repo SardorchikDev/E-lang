@@ -69,6 +69,14 @@ static const char *statement_type_name(StatementType type) {
             return "let";
         case STMT_SET:
             return "set";
+        case STMT_APPEND:
+            return "append";
+        case STMT_SET_ITEM:
+            return "set_item";
+        case STMT_REMOVE_ITEM:
+            return "remove_item";
+        case STMT_SET_FIELD:
+            return "set_field";
         case STMT_SAY:
             return "say";
         case STMT_ASK:
@@ -241,6 +249,25 @@ static void dump_expression(FILE *stream, const Expression *expression, int inde
                                  expression->as.call.arg_count,
                                  indent + 1);
             return;
+
+        case EXPR_ITEM_ACCESS:
+            (void) fputs("item_access", stream);
+            print_location(stream, expression->location);
+            (void) fputc('\n', stream);
+            print_indent(stream, indent + 1);
+            (void) fputs("index:\n", stream);
+            dump_expression(stream, expression->as.item_access.index, indent + 2);
+            print_indent(stream, indent + 1);
+            (void) fputs("collection:\n", stream);
+            dump_expression(stream, expression->as.item_access.collection, indent + 2);
+            return;
+
+        case EXPR_FIELD_ACCESS:
+            (void) fprintf(stream, "field_access %s", expression->as.field_access.field_name);
+            print_location(stream, expression->location);
+            (void) fputc('\n', stream);
+            dump_expression(stream, expression->as.field_access.record, indent + 1);
+            return;
     }
 }
 
@@ -270,6 +297,39 @@ static void dump_statement(FILE *stream, const Statement *statement, int indent)
                                 ? statement->as.let_stmt.value
                                 : statement->as.set_stmt.value,
                             indent + 1);
+            return;
+
+        case STMT_APPEND:
+            print_indent(stream, indent + 1);
+            (void) fprintf(stream, "name: %s\n", statement->as.append_stmt.name);
+            dump_expression(stream, statement->as.append_stmt.value, indent + 1);
+            return;
+
+        case STMT_SET_ITEM:
+            print_indent(stream, indent + 1);
+            (void) fprintf(stream, "name: %s\n", statement->as.set_item_stmt.name);
+            print_indent(stream, indent + 1);
+            (void) fputs("index:\n", stream);
+            dump_expression(stream, statement->as.set_item_stmt.index, indent + 2);
+            print_indent(stream, indent + 1);
+            (void) fputs("value:\n", stream);
+            dump_expression(stream, statement->as.set_item_stmt.value, indent + 2);
+            return;
+
+        case STMT_REMOVE_ITEM:
+            print_indent(stream, indent + 1);
+            (void) fprintf(stream, "name: %s\n", statement->as.remove_item_stmt.name);
+            print_indent(stream, indent + 1);
+            (void) fputs("index:\n", stream);
+            dump_expression(stream, statement->as.remove_item_stmt.index, indent + 2);
+            return;
+
+        case STMT_SET_FIELD:
+            print_indent(stream, indent + 1);
+            (void) fprintf(stream, "name: %s\n", statement->as.set_field_stmt.name);
+            print_indent(stream, indent + 1);
+            (void) fprintf(stream, "field: %s\n", statement->as.set_field_stmt.field_name);
+            dump_expression(stream, statement->as.set_field_stmt.value, indent + 1);
             return;
 
         case STMT_SAY:

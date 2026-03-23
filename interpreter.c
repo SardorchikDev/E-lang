@@ -208,6 +208,14 @@ static const char *statement_type_name(StatementType type) {
             return "let";
         case STMT_SET:
             return "set";
+        case STMT_APPEND:
+            return "append";
+        case STMT_SET_ITEM:
+            return "set item";
+        case STMT_REMOVE_ITEM:
+            return "remove item";
+        case STMT_SET_FIELD:
+            return "set field";
         case STMT_SAY:
             return "say";
         case STMT_ASK:
@@ -458,6 +466,115 @@ static bool evaluate_record_expression(Interpreter *interpreter, const Expressio
     }
 
     *out_value = record;
+    return true;
+}
+
+static bool value_to_one_based_index(Interpreter *interpreter,
+                                     const Expression *expression,
+                                     const char *anchor,
+                                     const Value *value,
+                                     int *out_index) {
+    double number;
+
+    if (!value_to_number(value, &number) || !is_whole_number(number) || number < 1.0) {
+        runtime_error_at(interpreter, expression->location, anchor,
+                         "This position should be a whole number starting at 1.");
+        return false;
+    }
+
+    *out_index = (int) round(number);
+    return true;
+}
+
+static bool evaluate_item_access_expression(Interpreter *interpreter,
+                                            const Expression *expression,
+                                            Value *out_value) {
+    Value index_value = value_none();
+    Value collection = value_none();
+    int index;
+
+    if (!evaluate_expression(interpreter, expression->as.item_access.index, &index_value)) {
+        return false;
+    }
+
+    if (!value_to_one_based_index(interpreter, expression, "item", &index_value, &index)) {
+        value_destroy(&index_value);
+        return false;
+    }
+    value_destroy(&index_value);
+
+    if (!evaluate_expression(interpreter, expression->as.item_access.collection, &collection)) {
+        return false;
+    }
+
+    if (collection.type == VALUE_LIST) {
+        if (!value_list_get(&collection, index, out_value)) {
+            value_destroy(&collection);
+            runtime_error_at(interpreter, expression->location, "item",
+                             "That item position is outside the list.");
+            return false;
+        }
+        value_destroy(&collection);
+        return true;
+    }
+
+    if (collection.type == VALUE_STRING) {
+        size_t length = strlen(collection.string != NULL ? collection.string : "");
+        char *text;
+
+        if (index < 1 || (size_t) index > length) {
+            value_destroy(&collection);
+            runtime_error_at(interpreter, expression->location, "item",
+                             "That item position is outside the text.");
+            return false;
+        }
+
+        text = (char *) malloc(2U);
+        if (text == NULL) {
+            value_destroy(&collection);
+            runtime_error_at(interpreter, expression->location, "item",
+                             "I ran out of memory while reading a character.");
+            return false;
+        }
+
+        text[0] = collection.string[index - 1];
+        text[1] = '\0';
+        value_destroy(&collection);
+        *out_value = value_string_owned(text);
+        return true;
+    }
+
+    value_destroy(&collection);
+    runtime_error_at(interpreter, expression->location, "item",
+                     "The word 'item' works with lists or text.");
+    return false;
+}
+
+static bool evaluate_field_access_expression(Interpreter *interpreter,
+                                             const Expression *expression,
+                                             Value *out_value) {
+    Value record = value_none();
+
+    if (!evaluate_expression(interpreter, expression->as.field_access.record, &record)) {
+        return false;
+    }
+
+    if (record.type != VALUE_RECORD) {
+        value_destroy(&record);
+        runtime_error_at(interpreter, expression->location, "field",
+                         "The word 'field' works with records.");
+        return false;
+    }
+
+    if (!value_record_get(&record, expression->as.field_access.field_name, out_value)) {
+        value_destroy(&record);
+        runtime_error_at(interpreter, expression->location, expression->as.field_access.field_name,
+                         "This record does not have the field '%s'.",
+                         expression->as.field_access.field_name);
+        return false;
+    }
+
+    value_destroy(&record);
     return true;
 }
 
@@ -988,6 +1105,10 @@ static bool evaluate_expression(Interpreter *interpreter, const Expression *expr
 
         case EXPR_CALL:
             return evaluate_call_expression(interpreter, expression, out_value);
+        case EXPR_ITEM_ACCESS:
+            return evaluate_item_access_expression(interpreter, expression, out_value);
+        case EXPR_FIELD_ACCESS:
+            return evaluate_field_access_expression(interpreter, expression, out_value);
     }
 
     runtime_error_at(interpreter, expression->location, NULL,
@@ -1185,6 +1306,241 @@ static ExecutionResult execute_set_statement(Interpreter *interpreter, const Sta
         runtime_error_at(interpreter, statement->location, statement->as.set_stmt.name,
                          "I do not know the variable '%s' yet. Create it with 'let' first.",
                          statement->as.set_stmt.name);
+        return exec_error();
+    }
+
+    return exec_ok();
+}
+
+static ExecutionResult execute_append_statement(Interpreter *interpreter, const Statement *statement) {
+    Value list = value_none();
+    Value item = value_none();
+    Value updated = value_none();
+
+    if (!runtime_get_variable(interpreter->runtime, statement->as.append_stmt.name, &list)) {
+        runtime_error_at(interpreter, statement->location, statement->as.append_stmt.name,
+                         "I do not know the list '%s' yet. Create it with 'let' first.",
+                         statement->as.append_stmt.name);
+        return exec_error();
+    }
+
+    if (list.type != VALUE_LIST) {
+        value_destroy(&list);
+        runtime_error_at(interpreter, statement->location, statement->as.append_stmt.name,
+                         "'%s' should be a list before you append to it.",
+                         statement->as.append_stmt.name);
+        return exec_error();
+    }
+
+    if (!evaluate_expression(interpreter, statement->as.append_stmt.value, &item)) {
+        value_destroy(&list);
+        return exec_error();
+    }
+
+    if (!value_list_append_copy(&list, &item, &updated)) {
+        value_destroy(&list);
+        value_destroy(&item);
+        runtime_error_at(interpreter, statement->location, statement->as.append_stmt.name,
+                         "I ran out of memory while appending to '%s'.",
+                         statement->as.append_stmt.name);
+        return exec_error();
+    }
+
+    value_destroy(&list);
+    value_destroy(&item);
+
+    if (!runtime_assign_variable(interpreter->runtime, statement->as.append_stmt.name, updated)) {
+        value_destroy(&updated);
+        runtime_error_at(interpreter, statement->location, statement->as.append_stmt.name,
+                         "I could not store the updated list '%s'.",
+                         statement->as.append_stmt.name);
+        return exec_error();
+    }
+
+    return exec_ok();
+}
+
+static ExecutionResult execute_set_item_statement(Interpreter *interpreter, const Statement *statement) {
+    Value list = value_none();
+    Value index_value = value_none();
+    Value item = value_none();
+    Value updated = value_none();
+    int index;
+    int length;
+
+    if (!runtime_get_variable(interpreter->runtime, statement->as.set_item_stmt.name, &list)) {
+        runtime_error_at(interpreter, statement->location, statement->as.set_item_stmt.name,
+                         "I do not know the list '%s' yet. Create it with 'let' first.",
+                         statement->as.set_item_stmt.name);
+        return exec_error();
+    }
+
+    if (list.type != VALUE_LIST) {
+        value_destroy(&list);
+        runtime_error_at(interpreter, statement->location, statement->as.set_item_stmt.name,
+                         "'%s' should be a list before you change one of its items.",
+                         statement->as.set_item_stmt.name);
+        return exec_error();
+    }
+
+    if (!evaluate_expression(interpreter, statement->as.set_item_stmt.index, &index_value)) {
+        value_destroy(&list);
+        return exec_error();
+    }
+
+    if (!value_to_one_based_index(interpreter, statement->as.set_item_stmt.index, "item", &index_value, &index)) {
+        value_destroy(&list);
+        value_destroy(&index_value);
+        return exec_error();
+    }
+    value_destroy(&index_value);
+
+    length = value_list_length(&list);
+    if (index < 1 || index > length) {
+        value_destroy(&list);
+        runtime_error_at(interpreter, statement->location, "item",
+                         "That item position is outside the list '%s'.",
+                         statement->as.set_item_stmt.name);
+        return exec_error();
+    }
+
+    if (!evaluate_expression(interpreter, statement->as.set_item_stmt.value, &item)) {
+        value_destroy(&list);
+        return exec_error();
+    }
+
+    if (!value_list_set_copy(&list, index, &item, &updated)) {
+        value_destroy(&list);
+        value_destroy(&item);
+        runtime_error_at(interpreter, statement->location, statement->as.set_item_stmt.name,
+                         "I ran out of memory while updating '%s'.",
+                         statement->as.set_item_stmt.name);
+        return exec_error();
+    }
+
+    value_destroy(&list);
+    value_destroy(&item);
+
+    if (!runtime_assign_variable(interpreter->runtime, statement->as.set_item_stmt.name, updated)) {
+        value_destroy(&updated);
+        runtime_error_at(interpreter, statement->location, statement->as.set_item_stmt.name,
+                         "I could not store the updated list '%s'.",
+                         statement->as.set_item_stmt.name);
+        return exec_error();
+    }
+
+    return exec_ok();
+}
+
+static ExecutionResult execute_remove_item_statement(Interpreter *interpreter, const Statement *statement) {
+    Value list = value_none();
+    Value index_value = value_none();
+    Value updated = value_none();
+    int index;
+    int length;
+
+    if (!runtime_get_variable(interpreter->runtime, statement->as.remove_item_stmt.name, &list)) {
+        runtime_error_at(interpreter, statement->location, statement->as.remove_item_stmt.name,
+                         "I do not know the list '%s' yet. Create it with 'let' first.",
+                         statement->as.remove_item_stmt.name);
+        return exec_error();
+    }
+
+    if (list.type != VALUE_LIST) {
+        value_destroy(&list);
+        runtime_error_at(interpreter, statement->location, statement->as.remove_item_stmt.name,
+                         "'%s' should be a list before you remove an item from it.",
+                         statement->as.remove_item_stmt.name);
+        return exec_error();
+    }
+
+    if (!evaluate_expression(interpreter, statement->as.remove_item_stmt.index, &index_value)) {
+        value_destroy(&list);
+        return exec_error();
+    }
+
+    if (!value_to_one_based_index(interpreter, statement->as.remove_item_stmt.index, "item", &index_value, &index)) {
+        value_destroy(&list);
+        value_destroy(&index_value);
+        return exec_error();
+    }
+    value_destroy(&index_value);
+
+    length = value_list_length(&list);
+    if (index < 1 || index > length) {
+        value_destroy(&list);
+        runtime_error_at(interpreter, statement->location, "item",
+                         "That item position is outside the list '%s'.",
+                         statement->as.remove_item_stmt.name);
+        return exec_error();
+    }
+
+    if (!value_list_remove_copy(&list, index, &updated, NULL)) {
+        value_destroy(&list);
+        runtime_error_at(interpreter, statement->location, statement->as.remove_item_stmt.name,
+                         "I ran out of memory while removing an item from '%s'.",
+                         statement->as.remove_item_stmt.name);
+        return exec_error();
+    }
+
+    value_destroy(&list);
+
+    if (!runtime_assign_variable(interpreter->runtime, statement->as.remove_item_stmt.name, updated)) {
+        value_destroy(&updated);
+        runtime_error_at(interpreter, statement->location, statement->as.remove_item_stmt.name,
+                         "I could not store the updated list '%s'.",
+                         statement->as.remove_item_stmt.name);
+        return exec_error();
+    }
+
+    return exec_ok();
+}
+
+static ExecutionResult execute_set_field_statement(Interpreter *interpreter, const Statement *statement) {
+    Value record = value_none();
+    Value field_value = value_none();
+    Value updated = value_none();
+
+    if (!runtime_get_variable(interpreter->runtime, statement->as.set_field_stmt.name, &record)) {
+        runtime_error_at(interpreter, statement->location, statement->as.set_field_stmt.name,
+                         "I do not know the record '%s' yet. Create it with 'let' first.",
+                         statement->as.set_field_stmt.name);
+        return exec_error();
+    }
+
+    if (record.type != VALUE_RECORD) {
+        value_destroy(&record);
+        runtime_error_at(interpreter, statement->location, statement->as.set_field_stmt.name,
+                         "'%s' should be a record before you change one of its fields.",
+                         statement->as.set_field_stmt.name);
+        return exec_error();
+    }
+
+    if (!evaluate_expression(interpreter, statement->as.set_field_stmt.value, &field_value)) {
+        value_destroy(&record);
+        return exec_error();
+    }
+
+    if (!value_record_set_copy(&record,
+                               statement->as.set_field_stmt.field_name,
+                               &field_value,
+                               &updated)) {
+        value_destroy(&record);
+        value_destroy(&field_value);
+        runtime_error_at(interpreter, statement->location, statement->as.set_field_stmt.field_name,
+                         "I ran out of memory while updating the field '%s'.",
+                         statement->as.set_field_stmt.field_name);
+        return exec_error();
+    }
+
+    value_destroy(&record);
+    value_destroy(&field_value);
+
+    if (!runtime_assign_variable(interpreter->runtime, statement->as.set_field_stmt.name, updated)) {
+        value_destroy(&updated);
+        runtime_error_at(interpreter, statement->location, statement->as.set_field_stmt.name,
+                         "I could not store the updated record '%s'.",
+                         statement->as.set_field_stmt.name);
         return exec_error();
     }
 
@@ -1548,6 +1904,14 @@ static ExecutionResult execute_statement(Interpreter *interpreter, const Stateme
             return execute_let_statement(interpreter, statement);
         case STMT_SET:
             return execute_set_statement(interpreter, statement);
+        case STMT_APPEND:
+            return execute_append_statement(interpreter, statement);
+        case STMT_SET_ITEM:
+            return execute_set_item_statement(interpreter, statement);
+        case STMT_REMOVE_ITEM:
+            return execute_remove_item_statement(interpreter, statement);
+        case STMT_SET_FIELD:
+            return execute_set_field_statement(interpreter, statement);
         case STMT_SAY:
             return execute_say_statement(interpreter, statement);
         case STMT_ASK:

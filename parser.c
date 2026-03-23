@@ -337,6 +337,8 @@ static bool expr_match_symbol(ExpressionParser *expr_parser, const char *symbol)
 }
 
 static Expression *parse_expression_internal(ExpressionParser *expr_parser);
+static Expression *parse_expression_range(Parser *parser, const LexedLine *line, int start, int end);
+static Expression *parse_unary(ExpressionParser *expr_parser);
 static Statement *parse_if_statement_from_tokens(Parser *parser, const LexedLine *line, int start_index);
 
 static Expression *make_number_expression(SourceLocation location, double number) {
@@ -441,6 +443,28 @@ static Expression *make_call_expression(SourceLocation location, char *name,
     return expression;
 }
 
+static Expression *make_item_access_expression(SourceLocation location,
+                                               Expression *index,
+                                               Expression *collection) {
+    Expression *expression = create_expression(location, EXPR_ITEM_ACCESS);
+    if (expression != NULL) {
+        expression->as.item_access.index = index;
+        expression->as.item_access.collection = collection;
+    }
+    return expression;
+}
+
+static Expression *make_field_access_expression(SourceLocation location,
+                                                char *field_name,
+                                                Expression *record) {
+    Expression *expression = create_expression(location, EXPR_FIELD_ACCESS);
+    if (expression != NULL) {
+        expression->as.field_access.field_name = field_name;
+        expression->as.field_access.record = record;
+    }
+    return expression;
+}
+
 static Expression *make_list_expression(SourceLocation location, Expression **items, int item_count) {
     Expression *expression = create_expression(location, EXPR_LIST);
     if (expression != NULL) {
@@ -459,6 +483,31 @@ static Expression *make_record_expression(SourceLocation location, char **keys,
         expression->as.record.count = count;
     }
     return expression;
+}
+
+static int find_top_level_word_in_range(const LexedLine *line, int start, int end, const char *word) {
+    int index;
+    int depth = 0;
+
+    for (index = start; index < end; index += 1) {
+        const Token *token = &line->tokens[index];
+
+        if (token_is_symbol(token, "(")) {
+            depth += 1;
+            continue;
+        }
+        if (token_is_symbol(token, ")")) {
+            if (depth > 0) {
+                depth -= 1;
+            }
+            continue;
+        }
+        if (depth == 0 && token_is_word(token, word)) {
+            return index;
+        }
+    }
+
+    return -1;
 }
 
 static Expression *parse_primary(ExpressionParser *expr_parser) {
@@ -581,6 +630,89 @@ static Expression *parse_primary(ExpressionParser *expr_parser) {
                             "I ran out of memory while building a function call.");
         }
         return call_expression;
+    }
+
+    if (token_is_word(token, "item") &&
+        find_top_level_word_in_range(expr_parser->line,
+                                     expr_parser->current + 1,
+                                     expr_parser->end,
+                                     "of") >= 0) {
+        Expression *index_expression;
+        Expression *collection_expression;
+        Expression *item_expression;
+        SourceLocation location = location_from_token(token);
+
+        expr_advance(expr_parser);
+        index_expression = parse_unary(expr_parser);
+        if (index_expression == NULL) {
+            return NULL;
+        }
+
+        if (!expr_match_word(expr_parser, "of")) {
+            free_expression(index_expression);
+            parser_error_at(expr_parser->parser, location, token->lexeme,
+                            "An item access should look like: item position of collection");
+            return NULL;
+        }
+
+        collection_expression = parse_primary(expr_parser);
+        if (collection_expression == NULL) {
+            free_expression(index_expression);
+            return NULL;
+        }
+
+        item_expression = make_item_access_expression(location, index_expression, collection_expression);
+        if (item_expression == NULL) {
+            free_expression(index_expression);
+            free_expression(collection_expression);
+            parser_error_at(expr_parser->parser, location, token->lexeme,
+                            "I ran out of memory while building an item access.");
+            return NULL;
+        }
+
+        return item_expression;
+    }
+
+    if (token_is_word(token, "field") &&
+        expr_parser->current + 2 < expr_parser->end &&
+        (expr_parser->line->tokens[expr_parser->current + 1].type == TOKEN_WORD ||
+         expr_parser->line->tokens[expr_parser->current + 1].type == TOKEN_STRING) &&
+        token_is_word(&expr_parser->line->tokens[expr_parser->current + 2], "of")) {
+        char *field_name;
+        Expression *record_expression;
+        Expression *field_expression;
+        SourceLocation location = location_from_token(token);
+
+        expr_advance(expr_parser);
+        field_name = copy_key_from_token(expr_parser->parser, expr_peek(expr_parser));
+        if (field_name == NULL) {
+            return NULL;
+        }
+
+        expr_advance(expr_parser);
+        if (!expr_match_word(expr_parser, "of")) {
+            free(field_name);
+            parser_error_at(expr_parser->parser, location, token->lexeme,
+                            "A field access should look like: field name of record");
+            return NULL;
+        }
+
+        record_expression = parse_primary(expr_parser);
+        if (record_expression == NULL) {
+            free(field_name);
+            return NULL;
+        }
+
+        field_expression = make_field_access_expression(location, field_name, record_expression);
+        if (field_expression == NULL) {
+            free(field_name);
+            free_expression(record_expression);
+            parser_error_at(expr_parser->parser, location, token->lexeme,
+                            "I ran out of memory while building a field access.");
+            return NULL;
+        }
+
+        return field_expression;
     }
 
     if (token_is_word(token, "list")) {
@@ -1295,10 +1427,187 @@ static Statement *parse_let_statement(Parser *parser, const LexedLine *line) {
     return statement;
 }
 
+static Statement *parse_append_statement(Parser *parser, const LexedLine *line) {
+    Statement *statement;
+    char *name;
+    Expression *value;
+
+    if (line->count < 4 ||
+        !token_is_word(&line->tokens[line->count - 2], "to") ||
+        line->tokens[line->count - 1].type != TOKEN_WORD) {
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "An append statement should look like: append value to list_name");
+        return NULL;
+    }
+
+    value = parse_expression_range(parser, line, 1, line->count - 2);
+    if (value == NULL) {
+        return NULL;
+    }
+
+    name = copy_name_from_token(parser, &line->tokens[line->count - 1], false);
+    if (name == NULL) {
+        free_expression(value);
+        return NULL;
+    }
+
+    statement = create_statement(location_from_line(line), STMT_APPEND);
+    if (statement == NULL) {
+        free(name);
+        free_expression(value);
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "I ran out of memory while building an append statement.");
+        return NULL;
+    }
+
+    statement->as.append_stmt.name = name;
+    statement->as.append_stmt.value = value;
+    parser->current_line += 1;
+    return statement;
+}
+
+static Statement *parse_set_item_statement(Parser *parser, const LexedLine *line) {
+    int index;
+    int to_index = -1;
+    int depth = 0;
+    Statement *statement;
+    char *name;
+    Expression *item_index;
+    Expression *value;
+
+    if (line->count < 7) {
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "A set item statement should look like: set item position of list_name to value");
+        return NULL;
+    }
+
+    for (index = 2; index < line->count; index += 1) {
+        const Token *token = &line->tokens[index];
+
+        if (token_is_symbol(token, "(")) {
+            depth += 1;
+            continue;
+        }
+        if (token_is_symbol(token, ")")) {
+            if (depth > 0) {
+                depth -= 1;
+            }
+            continue;
+        }
+        if (depth == 0 &&
+            token_is_word(token, "to") &&
+            index >= 5 &&
+            token_is_word(&line->tokens[index - 2], "of") &&
+            line->tokens[index - 1].type == TOKEN_WORD) {
+            to_index = index;
+            break;
+        }
+    }
+
+    if (to_index < 0 || to_index + 1 >= line->count) {
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "A set item statement should look like: set item position of list_name to value");
+        return NULL;
+    }
+
+    item_index = parse_expression_range(parser, line, 2, to_index - 2);
+    if (item_index == NULL) {
+        return NULL;
+    }
+
+    name = copy_name_from_token(parser, &line->tokens[to_index - 1], false);
+    if (name == NULL) {
+        free_expression(item_index);
+        return NULL;
+    }
+
+    value = parse_expression_range(parser, line, to_index + 1, line->count);
+    if (value == NULL) {
+        free(name);
+        free_expression(item_index);
+        return NULL;
+    }
+
+    statement = create_statement(location_from_line(line), STMT_SET_ITEM);
+    if (statement == NULL) {
+        free(name);
+        free_expression(item_index);
+        free_expression(value);
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "I ran out of memory while building a set item statement.");
+        return NULL;
+    }
+
+    statement->as.set_item_stmt.name = name;
+    statement->as.set_item_stmt.index = item_index;
+    statement->as.set_item_stmt.value = value;
+    parser->current_line += 1;
+    return statement;
+}
+
+static Statement *parse_set_field_statement(Parser *parser, const LexedLine *line) {
+    Statement *statement;
+    char *field_name;
+    char *name;
+    Expression *value;
+
+    if (line->count < 7 ||
+        (line->tokens[2].type != TOKEN_WORD && line->tokens[2].type != TOKEN_STRING) ||
+        !token_is_word(&line->tokens[3], "of") ||
+        line->tokens[4].type != TOKEN_WORD ||
+        !token_is_word(&line->tokens[5], "to")) {
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "A set field statement should look like: set field name of record_name to value");
+        return NULL;
+    }
+
+    field_name = copy_key_from_token(parser, &line->tokens[2]);
+    if (field_name == NULL) {
+        return NULL;
+    }
+
+    name = copy_name_from_token(parser, &line->tokens[4], false);
+    if (name == NULL) {
+        free(field_name);
+        return NULL;
+    }
+
+    value = parse_expression_range(parser, line, 6, line->count);
+    if (value == NULL) {
+        free(field_name);
+        free(name);
+        return NULL;
+    }
+
+    statement = create_statement(location_from_line(line), STMT_SET_FIELD);
+    if (statement == NULL) {
+        free(field_name);
+        free(name);
+        free_expression(value);
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "I ran out of memory while building a set field statement.");
+        return NULL;
+    }
+
+    statement->as.set_field_stmt.name = name;
+    statement->as.set_field_stmt.field_name = field_name;
+    statement->as.set_field_stmt.value = value;
+    parser->current_line += 1;
+    return statement;
+}
+
 static Statement *parse_set_statement(Parser *parser, const LexedLine *line) {
     Statement *statement;
     char *name;
     Expression *value;
+
+    if (line->count > 1 && token_is_word(&line->tokens[1], "item")) {
+        return parse_set_item_statement(parser, line);
+    }
+
+    if (line->count > 1 && token_is_word(&line->tokens[1], "field")) {
+        return parse_set_field_statement(parser, line);
+    }
 
     if (line->count < 4) {
         parser_error_at(parser, location_from_line(line), NULL,
@@ -1335,6 +1644,46 @@ static Statement *parse_set_statement(Parser *parser, const LexedLine *line) {
 
     statement->as.set_stmt.name = name;
     statement->as.set_stmt.value = value;
+    parser->current_line += 1;
+    return statement;
+}
+
+static Statement *parse_remove_statement(Parser *parser, const LexedLine *line) {
+    Statement *statement;
+    char *name;
+    Expression *item_index;
+
+    if (line->count < 5 ||
+        !token_is_word(&line->tokens[1], "item") ||
+        !token_is_word(&line->tokens[line->count - 2], "from") ||
+        line->tokens[line->count - 1].type != TOKEN_WORD) {
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "A remove statement should look like: remove item position from list_name");
+        return NULL;
+    }
+
+    item_index = parse_expression_range(parser, line, 2, line->count - 2);
+    if (item_index == NULL) {
+        return NULL;
+    }
+
+    name = copy_name_from_token(parser, &line->tokens[line->count - 1], false);
+    if (name == NULL) {
+        free_expression(item_index);
+        return NULL;
+    }
+
+    statement = create_statement(location_from_line(line), STMT_REMOVE_ITEM);
+    if (statement == NULL) {
+        free(name);
+        free_expression(item_index);
+        parser_error_at(parser, location_from_line(line), NULL,
+                        "I ran out of memory while building a remove statement.");
+        return NULL;
+    }
+
+    statement->as.remove_item_stmt.name = name;
+    statement->as.remove_item_stmt.index = item_index;
     parser->current_line += 1;
     return statement;
 }
@@ -1889,6 +2238,14 @@ static Statement *parse_statement(Parser *parser) {
         return parse_set_statement(parser, line);
     }
 
+    if (token_is_word(&line->tokens[0], "append")) {
+        return parse_append_statement(parser, line);
+    }
+
+    if (token_is_word(&line->tokens[0], "remove")) {
+        return parse_remove_statement(parser, line);
+    }
+
     if (token_is_word(&line->tokens[0], "say")) {
         return parse_say_statement(parser, line);
     }
@@ -1934,7 +2291,7 @@ static Statement *parse_statement(Parser *parser) {
     }
 
     parser_error_at(parser, location_from_line(line), line->tokens[0].lexeme,
-                    "I do not understand how this line starts. Try use, let, set, say, ask, if, repeat, while, for each, define function, call, return, break, continue, or note.");
+                    "I do not understand how this line starts. Try use, let, set, append, remove, say, ask, if, repeat, while, for each, define function, call, return, break, continue, or note.");
     return NULL;
 }
 
@@ -2016,6 +2373,14 @@ static void free_expression(Expression *expression) {
             }
             free(expression->as.call.arguments);
             break;
+        case EXPR_ITEM_ACCESS:
+            free_expression(expression->as.item_access.index);
+            free_expression(expression->as.item_access.collection);
+            break;
+        case EXPR_FIELD_ACCESS:
+            free(expression->as.field_access.field_name);
+            free_expression(expression->as.field_access.record);
+            break;
         case EXPR_NUMBER:
         case EXPR_BOOLEAN:
         case EXPR_NONE:
@@ -2043,6 +2408,24 @@ static void free_statement(Statement *statement) {
         case STMT_SET:
             free(statement->as.set_stmt.name);
             free_expression(statement->as.set_stmt.value);
+            break;
+        case STMT_APPEND:
+            free(statement->as.append_stmt.name);
+            free_expression(statement->as.append_stmt.value);
+            break;
+        case STMT_SET_ITEM:
+            free(statement->as.set_item_stmt.name);
+            free_expression(statement->as.set_item_stmt.index);
+            free_expression(statement->as.set_item_stmt.value);
+            break;
+        case STMT_REMOVE_ITEM:
+            free(statement->as.remove_item_stmt.name);
+            free_expression(statement->as.remove_item_stmt.index);
+            break;
+        case STMT_SET_FIELD:
+            free(statement->as.set_field_stmt.name);
+            free(statement->as.set_field_stmt.field_name);
+            free_expression(statement->as.set_field_stmt.value);
             break;
         case STMT_SAY:
             free_expression(statement->as.say_stmt.value);

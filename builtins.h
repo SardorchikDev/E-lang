@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 bool builtins_is_name(const char *name);
+bool builtins_get_arity(const char *name, int *out_min_args, int *out_max_args);
 bool builtins_execute_call(const Expression *expression,
                            Value *arguments,
                            int arg_count,
