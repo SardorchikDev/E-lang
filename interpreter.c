@@ -955,6 +955,10 @@ static bool evaluate_expression(Interpreter *interpreter, const Expression *expr
             *out_value = value_boolean(expression->as.boolean);
             return true;
 
+        case EXPR_NONE:
+            *out_value = value_none();
+            return true;
+
         case EXPR_VARIABLE:
             if (!runtime_get_variable(interpreter->runtime, expression->as.variable_name, out_value)) {
                 runtime_error_at(interpreter, expression->location, expression->as.variable_name,

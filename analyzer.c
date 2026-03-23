@@ -508,6 +508,7 @@ static bool analyze_expression(AnalyzerState *state,
         case EXPR_NUMBER:
         case EXPR_STRING:
         case EXPR_BOOLEAN:
+        case EXPR_NONE:
             return true;
 
         case EXPR_VARIABLE:

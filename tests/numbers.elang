@@ -1,0 +1,19 @@
+let decimal_value be 3.14
+let small_decimal be .5
+let empty_value be nothing
+
+call assert_equal with decimal_value, 3.14
+call assert_equal with small_decimal, 0.5
+call assert_equal with empty_value, nothing
+call assert_equal with (call type_of with empty_value), "nothing"
+
+call assert_equal with (call round with 3.6), 4
+call assert_equal with (call floor with 3.9), 3
+call assert_equal with (call ceiling with 3.1), 4
+call assert_equal with (call absolute with -8), 8
+call assert_equal with (call minimum with 4, 9), 4
+call assert_equal with (call maximum with 4, 9), 9
+
+let random_pick be call random_between with 1, 3
+call assert with random_pick is at least 1
+call assert with random_pick is at most 3

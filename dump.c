@@ -167,6 +167,12 @@ static void dump_expression(FILE *stream, const Expression *expression, int inde
             (void) fputc('\n', stream);
             return;
 
+        case EXPR_NONE:
+            (void) fputs("nothing", stream);
+            print_location(stream, expression->location);
+            (void) fputc('\n', stream);
+            return;
+
         case EXPR_VARIABLE:
             (void) fprintf(stream, "variable %s", expression->as.variable_name);
             print_location(stream, expression->location);

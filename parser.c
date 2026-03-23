@@ -164,7 +164,7 @@ static bool is_reserved_word(const char *word) {
         "for", "each", "note", "define", "function", "call", "return", "with",
         "break", "continue", "plus", "minus", "times", "divided", "by", "mod",
         "power", "not", "or", "is", "greater", "less", "equal", "at", "least",
-        "most", "contains", "true", "false", "list", "of", "record"
+        "most", "contains", "true", "false", "nothing", "list", "of", "record"
     };
     size_t index;
 
@@ -371,6 +371,10 @@ static Expression *make_boolean_expression(SourceLocation location, bool value) 
     return expression;
 }
 
+static Expression *make_none_expression(SourceLocation location) {
+    return create_expression(location, EXPR_NONE);
+}
+
 static Expression *make_variable_expression(SourceLocation location, const char *name) {
     Expression *expression = create_expression(location, EXPR_VARIABLE);
 
@@ -490,6 +494,11 @@ static Expression *parse_primary(ExpressionParser *expr_parser) {
     if (token_is_word(token, "false")) {
         expr_advance(expr_parser);
         return make_boolean_expression(location_from_token(token), false);
+    }
+
+    if (token_is_word(token, "nothing")) {
+        expr_advance(expr_parser);
+        return make_none_expression(location_from_token(token));
     }
 
     if (token_is_symbol(token, "(")) {
@@ -2009,6 +2018,7 @@ static void free_expression(Expression *expression) {
             break;
         case EXPR_NUMBER:
         case EXPR_BOOLEAN:
+        case EXPR_NONE:
             break;
     }
 

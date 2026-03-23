@@ -89,6 +89,39 @@ static bool is_symbol_character(char ch) {
     return ch == '(' || ch == ')' || ch == ',' || ch == '.';
 }
 
+static bool is_number_start(const char *text, size_t index) {
+    if (isdigit((unsigned char) text[index])) {
+        return true;
+    }
+
+    return text[index] == '.' && isdigit((unsigned char) text[index + 1]);
+}
+
+static size_t consume_number_literal(const char *text, size_t index) {
+    bool saw_dot = false;
+
+    while (isdigit((unsigned char) text[index])) {
+        index += 1;
+    }
+
+    if (text[index] == '.') {
+        saw_dot = true;
+        index += 1;
+        while (isdigit((unsigned char) text[index])) {
+            index += 1;
+        }
+    }
+
+    if (!saw_dot && text[index] == '.' && isdigit((unsigned char) text[index + 1])) {
+        index += 1;
+        while (isdigit((unsigned char) text[index])) {
+            index += 1;
+        }
+    }
+
+    return index;
+}
+
 static char decode_escape(char escaped) {
     switch (escaped) {
         case 'n':
@@ -230,6 +263,32 @@ static bool tokenize_line(const char *line_text, LexedLine *line, char *error_me
             if (!append_token(line, token)) {
                 free(text);
                 set_error_with_line(error_message, error_size, line->file_path, line->line_number, line->source_text,
+                                    "I ran out of memory while tokenizing this line.");
+                return false;
+            }
+            continue;
+        }
+
+        if (is_number_start(line_text, index)) {
+            start = index;
+            index = consume_number_literal(line_text, index);
+            text = copy_text(line_text + start, index - start);
+            if (text == NULL) {
+                set_error_with_line(error_message, error_size,
+                                    line->file_path, line->line_number, line->source_text,
+                                    "I ran out of memory while tokenizing this line.");
+                return false;
+            }
+
+            token.type = TOKEN_NUMBER;
+            token.line = line->line_number;
+            token.file_path = line->file_path;
+            token.source_text = line->source_text;
+            token.lexeme = text;
+            if (!append_token(line, token)) {
+                free(text);
+                set_error_with_line(error_message, error_size,
+                                    line->file_path, line->line_number, line->source_text,
                                     "I ran out of memory while tokenizing this line.");
                 return false;
             }

@@ -286,6 +286,7 @@ bool builtins_is_name(const char *name) {
         "assert", "assert_equal", "length", "item", "append", "set_item", "insert_item",
         "remove_item", "slice", "sort", "to_number", "to_text", "type_of",
         "lowercase", "uppercase", "trim", "split", "join", "sqrt", "random",
+        "random_between", "round", "floor", "ceiling", "absolute", "minimum", "maximum",
         "read_file", "write_file", "append_file", "file_exists",
         "get_field", "set_field", "has_field", "keys"
     };
@@ -663,6 +664,57 @@ bool builtins_execute_call(const Expression *expression,
         return true;
     }
 
+    if (equals_ignore_case(name, "round") ||
+        equals_ignore_case(name, "floor") ||
+        equals_ignore_case(name, "ceiling") ||
+        equals_ignore_case(name, "absolute")) {
+        double number;
+
+        if (arg_count != 1) {
+            builtin_error(error_message, error_size, location,
+                          "'%s' needs exactly 1 argument.", name);
+            return false;
+        }
+        if (!value_to_number(&arguments[0], &number)) {
+            builtin_error(error_message, error_size, location,
+                          "'%s' needs a number.", name);
+            return false;
+        }
+
+        if (equals_ignore_case(name, "round")) {
+            *out_value = value_number(round(number));
+        } else if (equals_ignore_case(name, "floor")) {
+            *out_value = value_number(floor(number));
+        } else if (equals_ignore_case(name, "ceiling")) {
+            *out_value = value_number(ceil(number));
+        } else {
+            *out_value = value_number(fabs(number));
+        }
+        return true;
+    }
+
+    if (equals_ignore_case(name, "minimum") || equals_ignore_case(name, "maximum")) {
+        double left_number;
+        double right_number;
+
+        if (arg_count != 2) {
+            builtin_error(error_message, error_size, location,
+                          "'%s' needs exactly 2 arguments.", name);
+            return false;
+        }
+        if (!value_to_number(&arguments[0], &left_number) ||
+            !value_to_number(&arguments[1], &right_number)) {
+            builtin_error(error_message, error_size, location,
+                          "'%s' needs numbers.", name);
+            return false;
+        }
+
+        *out_value = value_number(equals_ignore_case(name, "minimum")
+                                      ? (left_number < right_number ? left_number : right_number)
+                                      : (left_number > right_number ? left_number : right_number));
+        return true;
+    }
+
     if (equals_ignore_case(name, "random")) {
         if (arg_count != 0) {
             builtin_error(error_message, error_size, location,
@@ -674,6 +726,47 @@ bool builtins_execute_call(const Expression *expression,
             random_seeded = true;
         }
         *out_value = value_number((double) rand() / (double) RAND_MAX);
+        return true;
+    }
+
+    if (equals_ignore_case(name, "random_between")) {
+        double start_number;
+        double end_number;
+        long start_value;
+        long end_value;
+        long span;
+        long result;
+
+        if (arg_count != 2) {
+            builtin_error(error_message, error_size, location,
+                          "'random_between' needs exactly 2 arguments.");
+            return false;
+        }
+        if (!value_to_number(&arguments[0], &start_number) ||
+            !value_to_number(&arguments[1], &end_number) ||
+            fabs(start_number - round(start_number)) > 1e-9 ||
+            fabs(end_number - round(end_number)) > 1e-9) {
+            builtin_error(error_message, error_size, location,
+                          "'random_between' needs whole numbers.");
+            return false;
+        }
+
+        start_value = (long) round(start_number);
+        end_value = (long) round(end_number);
+        if (start_value > end_value) {
+            builtin_error(error_message, error_size, location,
+                          "'random_between' needs the first number to be less than or equal to the second.");
+            return false;
+        }
+
+        if (!random_seeded) {
+            srand((unsigned int) time(NULL));
+            random_seeded = true;
+        }
+
+        span = end_value - start_value + 1L;
+        result = start_value + (long) (rand() % span);
+        *out_value = value_number((double) result);
         return true;
     }
 

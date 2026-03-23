@@ -13,6 +13,16 @@ The implementation favors clarity over cleverness:
 
 E-Lang is line-based, forgiving where practical, and designed to be easy to extend later.
 
+## Purpose
+
+E-Lang is being built for a specific job:
+
+- make programming less syntax-hostile for absolute beginners
+- turn pseudocode-like English into something runnable
+- give non-programmers a readable scripting language
+
+So the language is aimed at teaching, first programs, classroom exercises, and small readable scripts. It is not trying to replace C for systems programming.
+
 ## Design
 
 ### What Makes E-Lang Feel Like English
@@ -53,6 +63,7 @@ E-Lang is line-based, forgiving where practical, and designed to be easy to exte
 - `analyzer.c` / `analyzer.h`: `--lint`
 - `sample.elang`: main example program
 - `sample_lib.elang`: imported helper used by the sample
+- `Testing-elang/`: extra example programs, including a guessing game
 - `tests/`: small regression suite
 - `Makefile`: build helper
 
@@ -147,6 +158,7 @@ Numbers:
 ```text
 10
 3.14
+.5
 -2
 ```
 
@@ -162,6 +174,12 @@ Booleans:
 ```text
 true
 false
+```
+
+Nothing:
+
+```text
+nothing
 ```
 
 Lists:
@@ -417,6 +435,13 @@ Math:
 
 - `sqrt`
 - `random`
+- `random_between`
+- `round`
+- `floor`
+- `ceiling`
+- `absolute`
+- `minimum`
+- `maximum`
 
 Files:
 
@@ -498,6 +523,7 @@ primary             -> NUMBER
                     | STRING
                     | "true"
                     | "false"
+                    | "nothing"
                     | NAME
                     | "(" expression ")"
                     | call_expression
@@ -522,6 +548,8 @@ field               -> (NAME | STRING) "is" expression
 6. Uses `contains` and `split` / `join`.
 7. Reads input with `ask`.
 
+There is also a smaller example game in `Testing-elang/guessing_game.elang`.
+
 Run it with:
 
 ```bash
@@ -540,6 +568,3 @@ The current project is already a real mini-language, but obvious next steps are:
 - richer static analysis
 - source maps for formatter/linter fixes
 - package management and a standard module folder
-# E-lang
-# E-lang
-# E-lang

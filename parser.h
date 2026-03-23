@@ -16,6 +16,7 @@ typedef enum {
     EXPR_NUMBER,
     EXPR_STRING,
     EXPR_BOOLEAN,
+    EXPR_NONE,
     EXPR_VARIABLE,
     EXPR_LIST,
     EXPR_RECORD,
